@@ -260,6 +260,16 @@ class HomeAssistant(object):
         else:
             self.async_add_job(target, *args)
 
+    def _loop_empty(self) -> bool:
+        """Python 3.4.2 empty loop compatibility function."""
+        # pylint: disable=protected-access
+        if sys.version_info < (3, 4, 3):
+            return len(self.loop._scheduled) == 0 and \
+                   len(self.loop._ready) == 0
+        else:
+            return self.loop._current_handle is None and \
+                   len(self.loop._ready) == 0
+
     def block_till_done(self) -> None:
         """Block till all pending work is done."""
         run_coroutine_threadsafe(
@@ -268,14 +278,16 @@ class HomeAssistant(object):
     @asyncio.coroutine
     def async_block_till_done(self):
         """Block till all pending work is done."""
-        while self._pending_tasks:
+        is_empty = False
+        while self._pending_tasks and not is_empty:
             pending = [task for task in self._pending_tasks
                        if not task.done()]
             self._pending_tasks.clear()
             if len(pending) > 0:
                 yield from asyncio.wait(pending, loop=self.loop)
-            else:
-                yield from asyncio.sleep(0, loop=self.loop)
+
+            is_empty = yield from self.loop.run_in_executor(None,
+                                                            self._loop_empty)
 
     def stop(self) -> None:
         """Stop Home Assistant and shuts down all threads."""
